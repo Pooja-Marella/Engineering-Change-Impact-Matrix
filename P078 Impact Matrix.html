@@ -1,0 +1,59 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>P078 Impact Matrix</title>
+<style>body{font-family:system-ui,sans-serif;max-width:760px;margin:2rem auto;padding:0 1rem;background:#fafafa;color:#222}
+textarea,pre{width:100%;box-sizing:border-box;font:13px monospace;padding:.6rem;border:1px solid #ccc;border-radius:6px;background:#fff}
+textarea{height:200px}button{padding:.5rem 1rem;margin:.6rem 0;border:0;border-radius:6px;background:#2b6cb0;color:#fff;cursor:pointer}
+.c{display:flex;gap:.6rem;flex-wrap:wrap}.c div{flex:1;min-width:150px;padding:.6rem;border-radius:6px}
+.a{background:#e6f4ea}.b{background:#fde8e8}.u{background:#fff4d6}</style></head><body>
+<h2>Engineering-change impact matrix</h2><p>Pick an example (or paste your own JSON), then press Analyze.</p>
+<select id="pre" onchange="load(this.value)" style="padding:.4rem;margin-bottom:.6rem"></select>
+<textarea id="in" placeholder="Paste input JSON here, or pick an example above"></textarea>
+<button onclick="run()">Analyze</button><div id="cards" class="c"></div><pre id="out"></pre>
+<script>
+const REQ=["assemblies","changed","compatibility"],bad=(reason,o={})=>({status:"invalid",reason,...o});
+function analyze(r){
+ if(r===null||typeof r!=="object"||Array.isArray(r))return bad("input_not_object");
+ const miss=REQ.filter(f=>!(f in r)).sort();if(miss.length)return bad("missing_required_field",{fields:miss});
+ const ex=Object.keys(r).filter(k=>!REQ.includes(k)).sort();if(ex.length)return bad("unknown_field",{fields:ex});
+ const {assemblies:asm,changed,compatibility:comp}=r,isO=x=>x&&typeof x==="object"&&!Array.isArray(x);
+ if(!isO(asm)||!Object.keys(asm).length)return bad("invalid_assemblies",{where:"assemblies"});
+ for(const[a,p]of Object.entries(asm))if(!Array.isArray(p)||!p.length||!p.every(x=>typeof x==="string"&&x))return bad("invalid_parts",{where:"assemblies."+a});
+ if(typeof changed!=="string"||!changed)return bad("invalid_changed",{where:"changed"});
+ if(!isO(comp))return bad("invalid_compatibility",{where:"compatibility"});
+ for(const[k,v]of Object.entries(comp)){if(!(k in asm))return bad("unknown_compatibility_key",{where:"compatibility."+k});
+  if(v!==null&&typeof v!=="boolean")return bad("invalid_compatibility_value",{where:"compatibility."+k});}
+ const nodes=new Set([...Object.keys(asm),...Object.values(asm).flat()]);
+ if(nodes.size>12)return bad("too_many_nodes",{detail:nodes.size+" nodes, max 12"});
+ if(!nodes.has(changed))return bad("changed_not_found",{where:"changed"});
+ const st={};let cyc=null;
+ const dfs=(n,path)=>{st[n]=1;for(const c of asm[n]||[]){if(!(c in asm)||cyc)continue;
+  if(st[c]===1){cyc=path.slice(path.indexOf(c)).concat(c);return}if(!st[c])dfs(c,path.concat(c));}st[n]=2};
+ for(const a in asm){if(!st[a])dfs(a,[a]);if(cyc)return bad("dependency_cycle",{where:cyc.join(" -> ")});}
+ const aff=new Set();let g=true;
+ while(g){g=false;for(const[a,ps]of Object.entries(asm))if(!aff.has(a)&&ps.some(p=>p===changed||aff.has(p))){aff.add(a);g=true}}
+ const o={affected:[],blocked:[],unknown:[],reasons:{}};
+ for(const a of[...aff].sort()){const v=comp[a];
+  if(v===true){o.affected.push(a);o.reasons[a]="affected, declared compatible: no blocking needed"}
+  else if(v===false){o.blocked.push(a);o.reasons[a]="affected, declared incompatible: blocked"}
+  else{o.unknown.push(a);o.reasons[a]="affected, compatibility null/missing: unknown"}}
+ return o}
+function run(){if(!document.getElementById("in").value.trim()){document.getElementById("out").textContent="Nothing to analyze yet. Paste JSON or pick an example.";document.getElementById("cards").innerHTML="";return}let res;try{res=analyze(JSON.parse(document.getElementById("in").value))}catch(e){res=bad("invalid_json",{detail:String(e)})}
+ document.getElementById("out").textContent=JSON.stringify(res,null,2);
+ document.getElementById("cards").innerHTML=res.status?"":[["a","Affected (compatible)",res.affected],["b","Blocked",res.blocked],["u","Unknown",res.unknown]]
+  .map(([c,t,l])=>`<div class="${c}"><b>${t}</b><br>${l.join(", ")||"-"}</div>`).join("")}
+const PRE={
+"1. Normal (worked example)":{assemblies:{A:["P"],B:["Q"]},changed:"P",compatibility:{A:true}},
+"2. Compatible / blocked / unknown + transitive":{assemblies:{A:["P"],B:["A"],C:["B","A"],D:["Q"]},changed:"P",compatibility:{A:true,B:false,D:false}},
+"3. Null compatibility = unknown":{assemblies:{A:["P"]},changed:"P",compatibility:{A:null}},
+"4. Deep chain, all blocked":{assemblies:{A:["P"],B:["A"],C:["B"]},changed:"P",compatibility:{A:false,B:false,C:false}},
+"5. Invalid: missing field":{changed:"P"},
+"6. Invalid: unknown extra field":{assemblies:{A:["P"]},changed:"P",compatibility:{},note:"x"},
+"7. Invalid: dependency cycle":{assemblies:{A:["B"],B:["A","P"]},changed:"P",compatibility:{}},
+"8. Invalid: self-loop":{assemblies:{A:["A"]},changed:"A",compatibility:{}},
+"9. Invalid: empty assemblies":{assemblies:{},changed:"P",compatibility:{}},
+"10. Invalid: changed part not found":{assemblies:{A:["P"]},changed:"Z",compatibility:{}}};
+const sel=document.getElementById("pre");
+sel.add(new Option("-- choose an example --",""));
+Object.keys(PRE).forEach(k=>sel.add(new Option(k,k)));
+function load(k){if(!k){document.getElementById("in").value="";document.getElementById("out").textContent="";document.getElementById("cards").innerHTML="";return}document.getElementById("in").value=JSON.stringify(PRE[k],null,2);document.getElementById("out").textContent="";document.getElementById("cards").innerHTML=""}
+
+</script></body></html>
